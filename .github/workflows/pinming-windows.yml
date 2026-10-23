@@ -6,7 +6,7 @@ name: Pinming Windows build
 on:
   workflow_dispatch:
   push:
-分支: [pinming]
+    branches: [pinming]
     paths: ['.github/workflows/pinming-windows.yml']
 
 env:
@@ -91,12 +91,12 @@ jobs:
           grep -n 'PinmingRemote' $f
           grep -n 'zero.kj1001.top' $f
           grep -n 'SdBnE5xwTWByjX3f60GhAJaH9XOLdO7SRtRxOyJuevw=' $f
-          # 閻㈠疇顕幒鍫熸綀閺冭埖甯堕崚鍓侇伂娑撳秴鑴婄€靛棛鐖滃鍡礉閺€閫涜礋閹绘劗銇氱粵澶婄窡鐎佃鏌熼幒銉ュ綀
+          # 鐢宠鎺堟潈鏃舵帶鍒剁涓嶅脊瀵嗙爜妗嗭紝鏀逛负鎻愮ず绛夊緟瀵规柟鎺ュ彈
           sed -i '/login without password, the remote side can click accept/{n;s|interface.msgbox("input-password", "Password Required", "", "");|interface.msgbox("wait-remote-accept-nook", "Prompt", "Please wait for the remote side to accept your session request...", "");|}' src/client.rs
           grep -n 'Please wait for the remote side to accept your session request...", "");' src/client.rs
-          # 绐楀彛鏍囬鍜岀晫闈㈤噷鏄剧ず鐨勭▼搴忓悕鏀逛负銆孹T杩滅▼銆嶏紱鍐呴儴绋嬪簭鍚嶄粛鏄� PinmingRemote锛岃澶囩爜涓嶅彉
-          sed -i -e "s|final name = bind.mainGetAppNameSync();|final name = 'XT杩滅▼';|" -e "s|_appName = bind.mainGetAppNameSync();|_appName = 'XT杩滅▼';|" flutter/lib/common.dart
-          test $(grep -c "'XT杩滅▼'" flutter/lib/common.dart) -eq 2
+          # 窗口标题和界面里显示的程序名改为「XT远程」；内部程序名仍是 PinmingRemote，设备码不变
+          sed -i -e "s|final name = bind.mainGetAppNameSync();|final name = 'XT远程';|" -e "s|_appName = bind.mainGetAppNameSync();|_appName = 'XT远程';|" flutter/lib/common.dart
+          test $(grep -c "'XT远程'" flutter/lib/common.dart) -eq 2
 
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -228,7 +228,7 @@ jobs:
 
       - name: Set SODIUM_LIB_DIR (arm64)
         # libsodium-sys ships no arm64 Windows prebuilt lib; point it at the vcpkg-built one
-        # (only for arm64 閳ワ拷 leaving it unset lets x64 use the crate's bundled lib).
+        # (only for arm64 鈥� leaving it unset lets x64 use the crate's bundled lib).
         if: ${{ matrix.job.arch == 'aarch64' }}
         shell: bash
         run: echo "SODIUM_LIB_DIR=$VCPKG_ROOT/installed/${{ matrix.job.vcpkg-triplet }}/lib" >> "$GITHUB_ENV"
