@@ -57,22 +57,27 @@ jobs:
             $start.WorkingDirectory=$dir
             $start.UseShellExecute=$false
             $start.RedirectStandardInput=$true
-            $start.RedirectStandardOutput=$true
+            $start.RedirectStandardOutput=($flag -ne '--install-service')
             $proc=[Diagnostics.Process]::Start($start)
             try {
-              $output=$proc.StandardOutput.ReadToEndAsync()
+              if ($start.RedirectStandardOutput) { $output=$proc.StandardOutput.ReadToEndAsync() }
               if ($inputText) { $proc.StandardInput.Write($inputText) }
               $proc.StandardInput.Close()
               if (!$proc.WaitForExit(60000)) { $proc.Kill(); throw "Engine command timed out: $flag" }
               if ($proc.ExitCode -ne 0) { throw "Engine command failed: $flag" }
+              if (!$start.RedirectStandardOutput) { return '' }
+              if (!$output.Wait(5000)) { throw "Engine output pipe stayed open: $flag" }
               return $output.Result.Trim()
             } finally { $proc.Dispose() }
           }
           try {
+            Write-Host 'Registering the bundled XT service'
             $null=Run-Engine '--install-service' ''
+            Write-Host 'Checking service state'
             $service=Get-Service $name
             if ($service.Status -ne 'Running') { Start-Service $name }
             $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+            Write-Host 'Reading device ID'
             $deadline=(Get-Date).AddSeconds(60)
             do {
               $peer=Run-Engine '--get-id' ''
