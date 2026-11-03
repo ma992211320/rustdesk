@@ -2939,6 +2939,15 @@ fn xt_account_session() -> bool {
     cfg!(windows) && std::env::var_os("XT_REMOTE_EXPECTED_PEER_KEY").is_some()
 }
 
+#[cfg(windows)]
+fn xt_report_pipe_auth(result: &str) {
+    if let Ok(nonce) = std::env::var("XT_REMOTE_AUTH_NONCE") {
+        if nonce.len() == 64 && nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
+            println!("XT-AUTH-V1 {nonce} {result}");
+        }
+    }
+}
+
 impl LoginConfigHandler {
     pub(crate) fn set_hash(&mut self, hash: Hash) {
         self.hash = hash;
@@ -3708,7 +3717,7 @@ impl LoginConfigHandler {
         if std::mem::take(&mut self.xt_pipe_auth_pending) {
             let additions = serde_json::from_str::<serde_json::Value>(&pi.platform_additions);
             if additions.ok().and_then(|v| v.get("xt_local_password_verified")?.as_bool()) == Some(true) {
-                println!("XT-AUTH-V1 VERIFIED");
+                xt_report_pipe_auth("VERIFIED");
             }
         }
         if !pi.version.is_empty() {
@@ -4538,7 +4547,7 @@ pub fn handle_login_error(
 ) -> bool {
     #[cfg(windows)]
     if err == LOGIN_MSG_PASSWORD_WRONG && std::mem::take(&mut lc.write().unwrap().xt_pipe_auth_pending) {
-        println!("XT-AUTH-V1 REJECTED");
+        xt_report_pipe_auth("REJECTED");
     }
     if err == LOGIN_MSG_PASSWORD_EMPTY {
         lc.write().unwrap().password = Default::default();
