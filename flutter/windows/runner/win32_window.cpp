@@ -198,6 +198,31 @@ bool Win32Window::CreateAndShow(const std::wstring& title,
   return OnCreate();
 }
 
+bool Win32Window::CreateHostedSession(HWND panel, DWORD host_pid) {
+  DWORD owner = 0;
+  RECT bounds = {};
+  if (!panel || !host_pid || !GetWindowThreadProcessId(panel, &owner) ||
+      owner != host_pid || !GetClientRect(panel, &bounds)) {
+    return false;
+  }
+  Destroy();
+  const wchar_t* window_class =
+      WindowClassRegistrar::GetInstance()->GetWindowClass();
+  HWND child = CreateWindowExW(0, window_class, L"XT Remote Session",
+      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0,
+      bounds.right - bounds.left, bounds.bottom - bounds.top, panel, nullptr,
+      GetModuleHandle(nullptr), this);
+  if (!child) {
+    return false;
+  }
+  if (!OnCreate()) {
+    DestroyWindow(child);
+    return false;
+  }
+  ShowWindow(child, SW_SHOWNA);
+  return true;
+}
+
 static void trySetWindowForeground(HWND window) {
     char* value = nullptr;
     size_t size = 0;
@@ -253,6 +278,10 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
 
     case WM_DPICHANGED: {
+      if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) {
+        // Embedded coordinates are owned by the XT panel.
+        return 0;
+      }
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
       LONG newHeight = newRectSize->bottom - newRectSize->top;

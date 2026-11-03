@@ -73,3 +73,7 @@ pub mod privacy_mode;
 pub mod virtual_display_manager;
 
 mod kcp_stream;
+
+// XT enrollment remains internal until authenticated local IPC is connected.
+#[cfg(windows)]
+mod xt_enrollment;

@@ -434,6 +434,37 @@ pub fn core_main() -> Option<Vec<String>> {
                 import_config(&filepath);
             }
             return None;
+        } else if args[0] == "--xt-sign-enrollment" {
+            #[cfg(windows)]
+            if args.len() == 1 && crate::platform::is_installed() && is_root() {
+                match crate::xt_enrollment::sign_from_stdin() {
+                    Ok(signature) => println!("{signature}"),
+                    Err(_) => eprintln!("XT enrollment request rejected"),
+                }
+            }
+            return None;
+        } else if cfg!(windows) && args[0] == "--xt-set-password-stdin" {
+            // The XT parent supplies a private inherited pipe and closes it after writing.
+            use std::io::Read;
+            if args.len() != 1 || is_cli_setting_change_disabled()
+                || config::Config::is_disable_change_permanent_password()
+                || !crate::platform::is_installed() || !is_root() {
+                println!("Request denied");
+                return None;
+            }
+            let mut password = String::new();
+            if std::io::stdin().lock().take(129).read_to_string(&mut password).is_err()
+                || !(8..=128).contains(&password.len())
+                || password.chars().any(char::is_control) {
+                println!("Invalid password");
+                return None;
+            }
+            if crate::ipc::set_permanent_password(password).is_ok() {
+                println!("Done!");
+            } else {
+                println!("Password update failed");
+            }
+            return None;
         } else if args[0] == "--password" {
             if is_cli_setting_change_disabled() {
                 println!("Settings are disabled!");

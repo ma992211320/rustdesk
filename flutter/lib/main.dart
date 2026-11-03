@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
+import 'package:flutter_hbb/desktop/pages/remote_page.dart' show RemotePage;
+import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart' show ToolbarState;
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
@@ -39,11 +41,25 @@ Future<void> main(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
-  debugPrint("launch args: $args");
   kBootArgs = List.from(args);
 
   if (!isDesktop) {
     runMobileApp();
+    return;
+  }
+  if (Platform.isWindows && args.isNotEmpty && args.first == '--xt-hosted-desktop') {
+    if (args.length != 2 || !RegExp(r'^[0-9]{6,16}$').hasMatch(args[1])) {
+      exit(2);
+    }
+    desktopType = DesktopType.remote;
+    kWindowType = WindowType.RemoteDesktop;
+    await initEnv(kAppTypeDesktopRemote);
+    bind.mainInitInputSource();
+    stateGlobal.getInputSource(force: true);
+    draggablePositions.load();
+    _runApp('XT远程协助', Scaffold(
+      body: RemotePage(id: args[1], toolbarState: ToolbarState()),
+    ), MyTheme.currentThemeMode());
     return;
   }
   // main window

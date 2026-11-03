@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <cstdint>
+#include <limits>
 
 #include "win32_desktop.h"
 #include "flutter_window.h"
@@ -19,6 +21,20 @@ typedef int (*FUNC_RUSTDESK_IS_DISABLE_INSTALLATION)();
 const std::vector<std::string> parameters_white_list = {"--install", "--cm"};
 
 const wchar_t* getWindowClassName();
+
+// Decimal-only launch fields shared with the native XT box host.
+static bool parse_xt_handle(const std::string& text, uintptr_t& result) {
+  if (text.empty()) return false;
+  uintptr_t value = 0;
+  for (const char ch : text) {
+    if (ch < '0' || ch > '9') return false;
+    const auto digit = static_cast<uintptr_t>(ch - '0');
+    if (value > ((std::numeric_limits<uintptr_t>::max)() - digit) / 10) return false;
+    value = value * 10 + digit;
+  }
+  result = value;
+  return value != 0;
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command)
@@ -47,7 +63,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       GetCommandLineArguments();
   // Remove possible trailing whitespace from command line arguments
   for (auto& argument : command_line_arguments) {
-    argument.erase(argument.find_last_not_of(" \n\r\t"));
+    argument.erase(argument.find_last_not_of(" \n\r\t") + 1);
+  }
+
+  const bool xt_hosted = !command_line_arguments.empty() &&
+      command_line_arguments.front() == "--xt-hosted-desktop";
+  uintptr_t xt_panel = 0, xt_pid = 0;
+  if (xt_hosted) {
+    if (command_line_arguments.size() != 4 ||
+        !parse_xt_handle(command_line_arguments[2], xt_panel) ||
+        !parse_xt_handle(command_line_arguments[3], xt_pid) ||
+        xt_pid > MAXDWORD) return EXIT_FAILURE;
+    const auto& peer = command_line_arguments[1];
+    if (peer.size() < 6 || peer.size() > 16 ||
+        peer.find_first_not_of("0123456789") != std::string::npos) return EXIT_FAILURE;
   }
 
   int args_len = 0;
@@ -91,7 +120,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Uri links dispatch
   HWND hwnd = ::FindWindowW(getWindowClassName(), app_name.c_str());
-  if (hwnd != NULL) {
+  if (hwnd != NULL && !xt_hosted) {
     // Allow multiple flutter instances when being executed by parameters
     // contained in whitelists.
     bool allow_multiple_instances = false;
@@ -147,7 +176,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     is_install_page = true;
   }
 
-  command_line_arguments.insert(command_line_arguments.end(), rust_args.begin(), rust_args.end());
+  if (xt_hosted) {
+    command_line_arguments.resize(2);
+  } else {
+    command_line_arguments.insert(command_line_arguments.end(), rust_args.begin(), rust_args.end());
+  }
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
@@ -175,7 +208,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   } else {
     window_title = app_name;
   }
-  if (!window.CreateAndShow(window_title, origin, size, !is_cm_page)) {
+  const bool created = xt_hosted
+      ? window.CreateHostedSession(reinterpret_cast<HWND>(xt_panel), static_cast<DWORD>(xt_pid))
+      : window.CreateAndShow(window_title, origin, size, !is_cm_page);
+  if (!created) {
       return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

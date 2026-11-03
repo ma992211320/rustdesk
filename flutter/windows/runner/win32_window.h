@@ -39,6 +39,9 @@ class Win32Window {
                      const Size& size,
                      bool showOnTaskBar = true);
 
+  // The session launcher supplies a dedicated XT host panel and its verified PID.
+  bool CreateHostedSession(HWND panel, DWORD host_pid);
+
   // Release OS resources associated with window.
   void Destroy();
 

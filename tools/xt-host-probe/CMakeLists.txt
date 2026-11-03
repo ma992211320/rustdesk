@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(XTRemoteHostProbe LANGUAGES CXX)
+add_executable(XTRemoteHostProbe WIN32 hosted-session-probe.cpp)
+target_compile_features(XTRemoteHostProbe PRIVATE cxx_std_17)
+target_compile_definitions(XTRemoteHostProbe PRIVATE UNICODE _UNICODE)
+target_link_libraries(XTRemoteHostProbe PRIVATE user32 shell32)
