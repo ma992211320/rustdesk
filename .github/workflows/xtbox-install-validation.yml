@@ -1,0 +1,44 @@
+name: XTBox 2.0.12 candidate installation
+on:
+  push:
+    branches: [codex/xtbox-212-install-validation]
+    paths: ['.github/workflows/xtbox-install-validation.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [clean, upgrade]
+    steps:
+      - name: Prepare and verify installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Install-Verified($uri,$digest,$name) {
+            $file = Join-Path $env:RUNNER_TEMP "$name.exe"
+            curl.exe --fail --location --retry 2 --max-time 240 --output $file $uri
+            if ($LASTEXITCODE -ne 0) { throw "Candidate download failed" }
+            if ((Get-FileHash $file).Hash -ne $digest) { throw "Unexpected $name installer digest" }
+            $proc = Start-Process $file -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "$name installer failed with $($proc.ExitCode)" }
+          }
+          if ('${{ matrix.scenario }}' -eq 'upgrade') {
+            Install-Verified 'https://zero.kj1001.top/downloads/XT%E7%9B%92%E5%AD%90-Setup-2.0.11.exe' 'de2c18d88fa76c023baddea3be077a000a1fa469c15707294bae6ced4601a9ed' 'old'
+            $old = Get-Item "$env:ProgramFiles/XTBox/XTBox.exe"
+            if ($old.VersionInfo.ProductVersion -notmatch '^2\.0\.11(\.0)?$') { throw "Expected 2.0.11 before upgrade" }
+            Get-Process XTBox -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+          Install-Verified 'https://zero.kj1001.top/downloads/xtbox-candidates/XTBox-2.0.12-rc1.exe' '9644d2032bab111814d37ccc4d75dd372db3cf9c8a3eec62bb2781b8646589af' 'candidate'
+          $box = Get-Item "$env:ProgramFiles/XTBox/XTBox.exe"
+          if ($box.VersionInfo.ProductVersion -notmatch '^2\.0\.12(\.0)?$') { throw "Unexpected XTBox version" }
+          $dir = "$env:ProgramFiles/XTRemoteEngine"
+          foreach ($name in 'XTRemoteEngine.exe','librustdesk.dll','flutter_windows.dll','LICENCE') {
+            if (!(Test-Path -LiteralPath "$dir/$name" -PathType Leaf)) { throw "Missing $name" }
+          }
+          if ((Get-FileHash "$dir/XTRemoteEngine.exe").Hash -ne '8edbf543eedbaa29732260a4134455b3473002308fa1531ddc0d1222c66d8158') { throw 'Installed engine hash mismatch' }
+          Write-Host 'Installed application version and embedded engine verified.'
