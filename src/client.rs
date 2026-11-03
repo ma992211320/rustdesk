@@ -1675,6 +1675,16 @@ impl Client {
                 log::error!("Handshake failed: invalid public key from rendezvous server");
             }
         }
+        // The XT shell supplies this only for an account-bound session.
+        #[cfg(windows)]
+        let xt_expected_key = std::env::var_os("XT_REMOTE_EXPECTED_PEER_KEY");
+        #[cfg(windows)]
+        if let Some(expected) = xt_expected_key.as_ref() {
+            let matches = option_pk.as_ref().map(|pk| crate::encode64(pk));
+            if matches.as_deref().is_none() || matches.as_deref() != expected.to_str() {
+                bail!("XT remote device identity changed");
+            }
+        }
         let sign_pk = match sign_pk {
             Some(v) => v,
             None => {
@@ -1735,6 +1745,10 @@ impl Client {
                                         picked,
                                     },
                                 )?;
+                                #[cfg(windows)]
+                                if xt_expected_key.is_some() {
+                                    return Ok(option_pk);
+                                }
                             } else {
                                 if is_webrtc {
                                     bail!("WebRTC handshake id mismatch (possible MITM)");
@@ -1770,6 +1784,10 @@ impl Client {
             None => {
                 bail!("Reset by the peer");
             }
+        }
+        #[cfg(windows)]
+        if xt_expected_key.is_some() {
+            bail!("XT remote device did not prove ownership of its registered key");
         }
         Ok(option_pk)
     }
@@ -2914,6 +2932,11 @@ impl Deref for LoginConfigHandler {
     }
 }
 
+// XT launches one account-bound desktop session per process.
+fn xt_account_session() -> bool {
+    cfg!(windows) && std::env::var_os("XT_REMOTE_EXPECTED_PEER_KEY").is_some()
+}
+
 impl LoginConfigHandler {
     pub(crate) fn set_hash(&mut self, hash: Hash) {
         self.hash = hash;
@@ -2975,14 +2998,14 @@ impl LoginConfigHandler {
         self.id = id;
         self.conn_type = conn_type;
         let config = self.load_config();
-        self.remember = !config.password.is_empty();
+        self.remember = !xt_account_session() && !config.password.is_empty();
         self.config = config;
 
         let conn_token = conn_token
             .map(|x| serde_json::from_str::<ConnToken>(&x).ok())
             .flatten();
         let mut sid = 0;
-        if let Some(token) = conn_token {
+        if let Some(token) = conn_token.filter(|_| !xt_account_session()) {
             sid = token.session_id;
             self.password = token.password; // use as last password
             self.password_source = token.password_source;
@@ -3694,24 +3717,26 @@ impl LoginConfigHandler {
         let password0 = config.password.clone();
         let remember = self.remember;
         let hash = self.hash.clone();
-        if remember {
-            // remember is true: use PeerConfig password or ui login
-            // not sync shared password to recent
-            if !password.is_empty()
-                && password != password0
-                && !self.password_source.is_shared_ab(&password, &hash)
-            {
-                config.password = password.clone();
-                log::debug!("remember password of {}", self.id);
-            }
-        } else {
-            if self.password_source.is_personal_ab(&password) {
-                // sync personal ab password to recent automatically
-                config.password = password.clone();
-                log::debug!("save ab password of {} to recent", self.id);
-            } else if !password0.is_empty() {
-                config.password = Default::default();
-                log::debug!("remove password of {}", self.id);
+        if !xt_account_session() {
+            if remember {
+                // remember is true: use PeerConfig password or ui login
+                // not sync shared password to recent
+                if !password.is_empty()
+                    && password != password0
+                    && !self.password_source.is_shared_ab(&password, &hash)
+                {
+                    config.password = password.clone();
+                    log::debug!("remember password of {}", self.id);
+                }
+            } else {
+                if self.password_source.is_personal_ab(&password) {
+                    // sync personal ab password to recent automatically
+                    config.password = password.clone();
+                    log::debug!("save ab password of {} to recent", self.id);
+                } else if !password0.is_empty() {
+                    config.password = Default::default();
+                    log::debug!("remove password of {}", self.id);
+                }
             }
         }
         if let Some((_, b, c)) = self.other_server.as_ref() {
@@ -3731,7 +3756,7 @@ impl LoginConfigHandler {
         #[cfg(feature = "flutter")]
         {
             // sync connected password to personal ab automatically if it is not shared password
-            if !config.password.is_empty()
+            if !xt_account_session() && !config.password.is_empty()
                 && !self.password_source.is_shared_ab(&password, &hash)
                 && !self.password_source.is_personal_ab(&password)
             {
@@ -4679,54 +4704,56 @@ pub async fn handle_hash(
     }
     // last password
     let mut password = lc.read().unwrap().password.clone();
-    // preset password
-    if password.is_empty() {
-        if !password_preset.is_empty() {
-            let mut hasher = Sha256::new();
-            hasher.update(password_preset);
-            hasher.update(&hash.salt);
-            let res = hasher.finalize();
-            password = res[..].into();
-            lc.write().unwrap().password_source = Default::default();
+    if !xt_account_session() {
+        // preset password
+        if password.is_empty() {
+            if !password_preset.is_empty() {
+                let mut hasher = Sha256::new();
+                hasher.update(password_preset);
+                hasher.update(&hash.salt);
+                let res = hasher.finalize();
+                password = res[..].into();
+                lc.write().unwrap().password_source = Default::default();
+            }
         }
-    }
-    // shared password
-    // Currently it's used only when click shared ab peer card
-    let shared_password = lc.write().unwrap().shared_password.take();
-    if let Some(shared_password) = shared_password {
-        if !shared_password.is_empty() {
-            let mut hasher = Sha256::new();
-            hasher.update(shared_password.clone());
-            hasher.update(&hash.salt);
-            let res = hasher.finalize();
-            password = res[..].into();
-            lc.write().unwrap().password_source = PasswordSource::SharedAb(shared_password);
+        // shared password
+        // Currently it's used only when click shared ab peer card
+        let shared_password = lc.write().unwrap().shared_password.take();
+        if let Some(shared_password) = shared_password {
+            if !shared_password.is_empty() {
+                let mut hasher = Sha256::new();
+                hasher.update(shared_password.clone());
+                hasher.update(&hash.salt);
+                let res = hasher.finalize();
+                password = res[..].into();
+                lc.write().unwrap().password_source = PasswordSource::SharedAb(shared_password);
+            }
         }
-    }
-    // peer config password
-    if password.is_empty() {
-        password = lc.read().unwrap().config.password.clone();
-        if !password.is_empty() {
-            lc.write().unwrap().password_source = Default::default();
+        // peer config password
+        if password.is_empty() {
+            password = lc.read().unwrap().config.password.clone();
+            if !password.is_empty() {
+                lc.write().unwrap().password_source = Default::default();
+            }
         }
-    }
-    // personal ab password
-    if password.is_empty() {
-        try_get_password_from_personal_ab(lc.clone(), &mut password);
-    }
+        // personal ab password
+        if password.is_empty() {
+            try_get_password_from_personal_ab(lc.clone(), &mut password);
+        }
 
-    if password.is_empty() {
-        let p = crate::ui_interface::get_builtin_option(keys::OPTION_DEFAULT_CONNECT_PASSWORD);
-        if !p.is_empty() {
-            let mut hasher = Sha256::new();
-            hasher.update(p.clone());
-            hasher.update(&hash.salt);
-            let res = hasher.finalize();
-            password = res[..].into();
-            lc.write().unwrap().password_source = PasswordSource::SharedAb(p); // reuse SharedAb here
+        if password.is_empty() {
+            let p = crate::ui_interface::get_builtin_option(keys::OPTION_DEFAULT_CONNECT_PASSWORD);
+            if !p.is_empty() {
+                let mut hasher = Sha256::new();
+                hasher.update(p.clone());
+                hasher.update(&hash.salt);
+                let res = hasher.finalize();
+                password = res[..].into();
+                lc.write().unwrap().password_source = PasswordSource::SharedAb(p); // reuse SharedAb here
+            }
         }
-    }
 
+    }
     lc.write().unwrap().password = password.clone();
 
     let is_terminal_admin = lc.read().unwrap().is_terminal_admin;
@@ -4825,7 +4852,7 @@ pub async fn handle_login_from_ui(
 ) {
     let mut hash_password = if password.is_empty() {
         let mut password2 = lc.read().unwrap().password.clone();
-        if password2.is_empty() {
+        if password2.is_empty() && !xt_account_session() {
             password2 = lc.read().unwrap().config.password.clone();
             if !password2.is_empty() {
                 lc.write().unwrap().password_source = Default::default();
