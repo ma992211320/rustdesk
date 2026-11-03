@@ -446,6 +446,8 @@ pub struct Connection {
     // eg. post_conn_audit
     tx_post_seq: mpsc::UnboundedSender<(String, Value)>,
     conn_audit_primary_auth: ConnAuditPrimaryAuth,
+    #[cfg(windows)]
+    xt_local_password_verified: bool,
     conn_audit_two_factor: ConnAuditTwoFactor,
     // Tracks read job IDs delegated to CM process.
     // When a read job is delegated to CM (via FS::ReadFile), the job id is added here.
@@ -657,6 +659,8 @@ impl Connection {
             terminal_user_token: None,
             terminal_generic_service: None,
             conn_audit_primary_auth: ConnAuditPrimaryAuth::None,
+            #[cfg(windows)]
+            xt_local_password_verified: false,
             conn_audit_two_factor: ConnAuditTwoFactor::None,
         };
         let addr = hbb_common::try_into_v4(addr);
@@ -1759,6 +1763,8 @@ impl Connection {
 
     fn set_conn_audit_primary_auth(&mut self, method: ConnAuditPrimaryAuth) {
         self.conn_audit_primary_auth = method;
+        #[cfg(windows)]
+        { self.xt_local_password_verified = false; }
     }
 
     fn set_conn_audit_two_factor(&mut self, two_factor: ConnAuditTwoFactor) {
@@ -1956,6 +1962,10 @@ impl Connection {
             all(target_os = "macos", feature = "unix-file-copy-paste")
         ))]
         let mut platform_additions = serde_json::Map::new();
+        #[cfg(windows)]
+        if self.xt_local_password_verified && self.conn_audit_primary_auth == ConnAuditPrimaryAuth::PermanentPassword {
+            platform_additions.insert("xt_local_password_verified".into(), json!(true));
+        }
         #[cfg(target_os = "linux")]
         {
             if crate::platform::current_is_wayland() {
@@ -2580,6 +2590,8 @@ impl Connection {
                     && self.validate_password_storage(&local_storage)
                 {
                     self.set_conn_audit_primary_auth(ConnAuditPrimaryAuth::PermanentPassword);
+                    #[cfg(windows)]
+                    { self.xt_local_password_verified = true; }
                     print_fallback();
                     return true;
                 }
