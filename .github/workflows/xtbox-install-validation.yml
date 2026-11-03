@@ -24,7 +24,9 @@ jobs:
             curl.exe --fail --location --retry 2 --max-time 240 --output $file $uri
             if ($LASTEXITCODE -ne 0) { throw "Candidate download failed" }
             if ((Get-FileHash $file).Hash -ne $digest) { throw "Unexpected $name installer digest" }
-            $proc = Start-Process $file -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
+            $proc = Start-Process $file -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -PassThru
+            if (!$proc.WaitForExit(180000)) { throw "$name installer exceeded three minutes" }
+            Write-Host "$name installer exited with $($proc.ExitCode)"
             if ($proc.ExitCode -ne 0) { throw "$name installer failed with $($proc.ExitCode)" }
           }
           if ('${{ matrix.scenario }}' -eq 'upgrade') {
