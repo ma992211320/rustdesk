@@ -2917,6 +2917,8 @@ pub struct LoginConfigHandler {
     pub mark_unsupported: Vec<CodecFormat>,
     pub selected_windows_session_id: Option<u32>,
     pub peer_info: Option<PeerInfo>,
+    #[cfg(windows)]
+    xt_pipe_auth_pending: bool,
     password_source: PasswordSource, // where the sent password comes from
     shared_password: Option<String>, // Store the shared password
     pub enable_trusted_devices: bool,
@@ -3702,6 +3704,13 @@ impl LoginConfigHandler {
     /// * `username` - The name of the peer.
     /// * `pi` - The peer info.
     pub fn handle_peer_info(&mut self, pi: &PeerInfo) {
+        #[cfg(windows)]
+        if std::mem::take(&mut self.xt_pipe_auth_pending) {
+            let additions = serde_json::from_str::<serde_json::Value>(&pi.platform_additions);
+            if additions.ok().and_then(|v| v.get("xt_local_password_verified")?.as_bool()) == Some(true) {
+                println!("XT-AUTH-V1 VERIFIED");
+            }
+        }
         if !pi.version.is_empty() {
             self.version = hbb_common::get_version_number(&pi.version);
         }
@@ -4527,6 +4536,10 @@ pub fn handle_login_error(
     err: &str,
     interface: &impl Interface,
 ) -> bool {
+    #[cfg(windows)]
+    if err == LOGIN_MSG_PASSWORD_WRONG && std::mem::take(&mut lc.write().unwrap().xt_pipe_auth_pending) {
+        println!("XT-AUTH-V1 REJECTED");
+    }
     if err == LOGIN_MSG_PASSWORD_EMPTY {
         lc.write().unwrap().password = Default::default();
         interface.msgbox("input-password", "Password Required", "", "");
@@ -4704,6 +4717,23 @@ pub async fn handle_hash(
     }
     // last password
     let mut password = lc.read().unwrap().password.clone();
+    #[cfg(windows)]
+    if xt_account_session() && std::env::var_os("XT_REMOTE_PASSWORD_PIPE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        use std::{io::Read, sync::atomic::{AtomicBool, Ordering}};
+        static CONSUMED: AtomicBool = AtomicBool::new(false);
+        if !CONSUMED.swap(true, Ordering::AcqRel) {
+            let mut secret = Vec::new();
+            let ok = std::io::stdin().lock().take(129).read_to_end(&mut secret).is_ok();
+            if ok && (8..=128).contains(&secret.len()) {
+                let mut hasher = Sha256::new();
+                hasher.update(&secret);
+                hasher.update(&hash.salt);
+                password = hasher.finalize()[..].into();
+                lc.write().unwrap().xt_pipe_auth_pending = true;
+            }
+            secret.fill(0);
+        }
+    }
     if !xt_account_session() {
         // preset password
         if password.is_empty() {
@@ -4850,6 +4880,8 @@ pub async fn handle_login_from_ui(
     remember: bool,
     peer: &mut Stream,
 ) {
+    #[cfg(windows)]
+    { lc.write().unwrap().xt_pipe_auth_pending = false; }
     let mut hash_password = if password.is_empty() {
         let mut password2 = lc.read().unwrap().password.clone();
         if password2.is_empty() && !xt_account_session() {
