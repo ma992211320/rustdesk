@@ -44,3 +44,45 @@ jobs:
           }
           if ((Get-FileHash "$dir/XTRemoteEngine.exe").Hash -ne '8edbf543eedbaa29732260a4134455b3473002308fa1531ddc0d1222c66d8158') { throw 'Installed engine hash mismatch' }
           Write-Host 'Installed application version and embedded engine verified.'
+
+      - name: Verify XT service startup and safety password update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $name='XTRemoteEngine'
+          $dir=Join-Path $env:ProgramFiles $name
+          $exe=Join-Path $dir "$name.exe"
+          function Run-Engine([string]$flag,[string]$inputText) {
+            $start=[Diagnostics.ProcessStartInfo]::new($exe,$flag)
+            $start.WorkingDirectory=$dir
+            $start.UseShellExecute=$false
+            $start.RedirectStandardInput=$true
+            $start.RedirectStandardOutput=$true
+            $proc=[Diagnostics.Process]::Start($start)
+            try {
+              $output=$proc.StandardOutput.ReadToEndAsync()
+              if ($inputText) { $proc.StandardInput.Write($inputText) }
+              $proc.StandardInput.Close()
+              if (!$proc.WaitForExit(60000)) { $proc.Kill(); throw "Engine command timed out: $flag" }
+              if ($proc.ExitCode -ne 0) { throw "Engine command failed: $flag" }
+              return $output.Result.Trim()
+            } finally { $proc.Dispose() }
+          }
+          try {
+            $null=Run-Engine '--install-service' ''
+            $service=Get-Service $name
+            if ($service.Status -ne 'Running') { Start-Service $name }
+            $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+            $deadline=(Get-Date).AddSeconds(60)
+            do {
+              $peer=Run-Engine '--get-id' ''
+              if ($peer -match '^\d{6,16}$') { break }
+              Start-Sleep 2
+            } while ((Get-Date) -lt $deadline)
+            if ($peer -notmatch '^\d{6,16}$') { throw 'No valid engine ID' }
+            $secret=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
+            if ((Run-Engine '--xt-set-password-stdin' $secret) -ne 'Done!') { throw 'Safety password update was not acknowledged' }
+            Write-Host 'Verified running XT service, device ID and acknowledged password change.'
+          } finally {
+            Get-Service $name -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+          }
