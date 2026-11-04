@@ -3358,7 +3358,8 @@ pub fn install_service() -> bool {
         log::debug!("{err}");
         return true;
     }
-    run_after_run_cmds(false);
+    // The XT box owns the home UI; retain tray startup without a separate home window.
+    run_after_run_cmds(crate::get_app_name() == "XTRemoteEngine");
     std::process::exit(0);
 }
 
