@@ -67,7 +67,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   const bool xt_hosted = !command_line_arguments.empty() &&
-      command_line_arguments.front() == "--xt-hosted-desktop";
+      (command_line_arguments.front() == "--xt-hosted-desktop" ||
+       command_line_arguments.front() == "--xt-hosted-file");
   uintptr_t xt_panel = 0, xt_pid = 0;
   if (xt_hosted) {
     if (command_line_arguments.size() != 4 ||
