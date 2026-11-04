@@ -80,8 +80,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
         peer.find_first_not_of("0123456789") != std::string::npos) return EXIT_FAILURE;
   }
 
+  if (xt_hosted) std::cerr << "XT host: arguments validated" << std::endl;
   int args_len = 0;
   char** c_args = rustdesk_core_main(&args_len);
+  if (xt_hosted) std::cerr << "XT host: core initialized" << std::endl;
   if (!c_args)
   {
     std::string args_str = "";
@@ -209,9 +211,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   } else {
     window_title = app_name;
   }
+  if (xt_hosted) std::cerr << "XT host: creating child window" << std::endl;
   const bool created = xt_hosted
       ? window.CreateHostedSession(reinterpret_cast<HWND>(xt_panel), static_cast<DWORD>(xt_pid))
       : window.CreateAndShow(window_title, origin, size, !is_cm_page);
+  if (xt_hosted) std::cerr << "XT host: child creation result " << created << std::endl;
   if (!created) {
       return EXIT_FAILURE;
   }
