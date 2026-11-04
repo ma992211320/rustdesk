@@ -35,14 +35,14 @@ jobs:
             if ($old.VersionInfo.ProductVersion -notmatch '^2\.0\.11(\.0)?$') { throw "Expected 2.0.11 before upgrade" }
             Get-Process XTBox -ErrorAction SilentlyContinue | Stop-Process -Force
           }
-          Install-Verified 'https://zero.kj1001.top/downloads/xtbox-candidates/XTBox-2.0.12-rc1.exe' '9644d2032bab111814d37ccc4d75dd372db3cf9c8a3eec62bb2781b8646589af' 'candidate'
+          Install-Verified 'https://zero.kj1001.top/downloads/xtbox-candidates/XTBox-2.0.12-rc2.exe' 'f97d4e5723e7e0b3f8b3b7bdb4bfadf0ccc5d28c23b009837555ea26687cddb3' 'candidate'
           $box = Get-Item "$env:ProgramFiles/XTBox/XTBox.exe"
           if ($box.VersionInfo.ProductVersion -notmatch '^2\.0\.12(\.0)?$') { throw "Unexpected XTBox version" }
           $dir = "$env:ProgramFiles/XTRemoteEngine"
           foreach ($name in 'XTRemoteEngine.exe','librustdesk.dll','flutter_windows.dll','LICENCE') {
             if (!(Test-Path -LiteralPath "$dir/$name" -PathType Leaf)) { throw "Missing $name" }
           }
-          if ((Get-FileHash "$dir/XTRemoteEngine.exe").Hash -ne '8edbf543eedbaa29732260a4134455b3473002308fa1531ddc0d1222c66d8158') { throw 'Installed engine hash mismatch' }
+          if ((Get-FileHash "$dir/XTRemoteEngine.exe").Hash -ne '7dd949eb76fe4bfd94b1f38d0354b27c96e2ea81686763ca401925e8d714d7ba') { throw 'Installed engine hash mismatch' }
           Write-Host 'Installed application version and embedded engine verified.'
 
       - name: Verify XT service startup and safety password update
