@@ -98,13 +98,11 @@ jobs:
           $file = Join-Path $env:RUNNER_TEMP 'xt-credential-check.exe'
           curl.exe -fsSL --retry 2 --max-time 180 -o $file 'https://zero.kj1001.top/downloads/xtbox-candidates/credential-check-15a628501c2146ae.exe'
           if ($LASTEXITCODE -ne 0 -or (Get-FileHash $file).Hash -ne '15a628501c2146ae5b1957b1861a3979aa759797616d7a0881a18b789eb39ca2') { throw 'Unexpected credential probe' }
-          $testArgs = @('-test.v', '-test.run', '^(TestWindowsRememberedPassword|TestCredentialIsolation)
-          if ($code -ne 0) { throw 'Windows credential validation failed' }
-, '-test.timeout', '30s')
+          $testArgs = @('-test.v', '-test.run', '^(TestWindowsRememberedPassword|TestCredentialIsolation)$', '-test.timeout', '30s')
           $result = & $file @testArgs
           $code = $LASTEXITCODE
           $result | Write-Output
           foreach ($name in 'TestWindowsRememberedPassword','TestCredentialIsolation') {
             if (($result -join "`n") -notmatch "--- PASS: $name ") { throw "Missing test success: $name" }
           }
-          if ($LASTEXITCODE -ne 0) { throw 'Windows credential validation failed' }
+          if ($code -ne 0) { throw 'Windows credential validation failed' }
