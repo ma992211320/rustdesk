@@ -1,0 +1,17 @@
+name: XT remote engine candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-candidate-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the XT candidate branch
+        run: |
+          echo 'Select codex/xt-engine-windows-candidate in the Run workflow branch menu.'
+          echo 'The Windows build workflow is maintained on that branch.'
+          exit 1
