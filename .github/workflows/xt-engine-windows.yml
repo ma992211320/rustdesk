@@ -344,6 +344,14 @@ jobs:
           public static class XTWindowCheck {
             [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
             [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+            public static IntPtr OwnedChild(IntPtr parent, uint process) {
+              IntPtr child = IntPtr.Zero;
+              while ((child = FindWindowEx(parent, child, null, null)) != IntPtr.Zero) {
+                uint owner; GetWindowThreadProcessId(child, out owner);
+                if (owner == process) return child;
+              }
+              return IntPtr.Zero;
+            }
           }
           '@
             foreach ($sessionMode in @('--xt-hosted-desktop','--xt-hosted-file')) {
@@ -353,13 +361,15 @@ jobs:
             $form.Controls.Add($panel)
             $form.Show()
             $viewer=$null
+            $viewerOut=Join-Path $env:RUNNER_TEMP "$sessionMode-out.txt"
+            $viewerErr=Join-Path $env:RUNNER_TEMP "$sessionMode-err.txt"
             try {
               # Use only the disposable runner's own ID to probe native window parenting.
-              $viewer=Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -ArgumentList @($sessionMode,$peer,$panel.Handle.ToInt64().ToString(),$PID.ToString())
+              $viewer=Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -RedirectStandardOutput $viewerOut -RedirectStandardError $viewerErr -ArgumentList @($sessionMode,$peer,$panel.Handle.ToInt64().ToString(),$PID.ToString())
               $until=(Get-Date).AddSeconds(40)
               do {
                 [Windows.Forms.Application]::DoEvents()
-                $child=[XTWindowCheck]::FindWindowEx($panel.Handle,[IntPtr]::Zero,$null,'XT Remote Session')
+                $child=[XTWindowCheck]::OwnedChild($panel.Handle,[uint32]$viewer.Id)
                 if ($child -ne [IntPtr]::Zero) { break }
                 if ($viewer.HasExited) { throw "Hosted viewer exited before attaching: $($viewer.ExitCode)" }
                 Start-Sleep -Milliseconds 100
@@ -376,6 +386,9 @@ jobs:
               } while ((Get-Date) -lt $stableUntil)
               Write-Host "Verified $sessionMode native child window and startup survival."
             } finally {
+              foreach ($logPath in @($viewerOut,$viewerErr)) {
+                if (Test-Path $logPath) { Get-Content $logPath -Tail 60 | Write-Host }
+              }
               $form.Dispose()
               if ($viewer -and !$viewer.HasExited) { $viewer.Kill(); $null=$viewer.WaitForExit(5000) }
             }
