@@ -292,6 +292,98 @@ jobs:
           }
           Copy-Item -LiteralPath ./LICENCE -Destination ./rustdesk/LICENCE -ErrorAction Stop
 
+      - name: Verify bundled XT service and both hosted session windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $name='XTRemoteEngine'
+          $dir=Join-Path $env:ProgramFiles $name
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item -Path './rustdesk/*' -Destination $dir -Recurse -Force
+          $exe=Join-Path $dir "$name.exe"
+          function Run-Engine([string]$flag,[string]$inputText) {
+            $start=[Diagnostics.ProcessStartInfo]::new($exe,$flag)
+            $start.WorkingDirectory=$dir
+            $start.UseShellExecute=$false
+            $start.RedirectStandardInput=$true
+            $start.RedirectStandardOutput=($flag -ne '--install-service')
+            $proc=[Diagnostics.Process]::Start($start)
+            try {
+              if ($start.RedirectStandardOutput) { $output=$proc.StandardOutput.ReadToEndAsync() }
+              if ($inputText) { $proc.StandardInput.Write($inputText) }
+              $proc.StandardInput.Close()
+              if (!$proc.WaitForExit(60000)) { $proc.Kill(); throw "Engine command timed out: $flag" }
+              if ($proc.ExitCode -ne 0) { throw "Engine command failed: $flag" }
+              if (!$start.RedirectStandardOutput) { return '' }
+              if (!$output.Wait(5000)) { throw "Engine output pipe stayed open: $flag" }
+              return $output.Result.Trim()
+            } finally { $proc.Dispose() }
+          }
+          try {
+            Write-Host 'Registering the bundled XT service'
+            $null=Run-Engine '--install-service' ''
+            Write-Host 'Checking service state'
+            $service=Get-Service $name
+            if ($service.Status -ne 'Running') { Start-Service $name }
+            $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+            Write-Host 'Reading device ID'
+            $deadline=(Get-Date).AddSeconds(60)
+            do {
+              $peer=Run-Engine '--get-id' ''
+              if ($peer -match '^\d{6,16}$') { break }
+              Start-Sleep 2
+            } while ((Get-Date) -lt $deadline)
+            if ($peer -notmatch '^\d{6,16}$') { throw 'No valid engine ID' }
+            $secret=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
+            if ((Run-Engine '--xt-set-password-stdin' $secret) -ne 'Done!') { throw 'Safety password update was not acknowledged' }
+            Write-Host 'Verified running XT service, device ID and acknowledged password change.'
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class XTWindowCheck {
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+          }
+          '@
+            foreach ($sessionMode in @('--xt-hosted-desktop','--xt-hosted-file')) {
+            $form=[Windows.Forms.Form]::new()
+            $panel=[Windows.Forms.Panel]::new()
+            $panel.Dock='Fill'
+            $form.Controls.Add($panel)
+            $form.Show()
+            $viewer=$null
+            try {
+              # Use only the disposable runner's own ID to probe native window parenting.
+              $viewer=Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -ArgumentList @($sessionMode,$peer,$panel.Handle.ToInt64().ToString(),$PID.ToString())
+              $until=(Get-Date).AddSeconds(40)
+              do {
+                [Windows.Forms.Application]::DoEvents()
+                $child=[XTWindowCheck]::FindWindowEx($panel.Handle,[IntPtr]::Zero,$null,'XT Remote Session')
+                if ($child -ne [IntPtr]::Zero) { break }
+                if ($viewer.HasExited) { throw "Hosted viewer exited before attaching: $($viewer.ExitCode)" }
+                Start-Sleep -Milliseconds 100
+              } while ((Get-Date) -lt $until)
+              if ($child -eq [IntPtr]::Zero) { throw 'Missing embedded session child window' }
+              [uint32]$owner=0
+              $null=[XTWindowCheck]::GetWindowThreadProcessId($child,[ref]$owner)
+              if ($owner -ne $viewer.Id) { throw 'Embedded window belongs to unexpected process' }
+              $stableUntil=(Get-Date).AddSeconds(3)
+              do {
+                [Windows.Forms.Application]::DoEvents()
+                if ($viewer.HasExited) { throw "$sessionMode exited after attaching: $($viewer.ExitCode)" }
+                Start-Sleep -Milliseconds 100
+              } while ((Get-Date) -lt $stableUntil)
+              Write-Host "Verified $sessionMode native child window and startup survival."
+            } finally {
+              $form.Dispose()
+              if ($viewer -and !$viewer.HasExited) { $viewer.Kill(); $null=$viewer.WaitForExit(5000) }
+            }
+            }
+          } finally {
+            Get-Service $name -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Build XT session host probe
         shell: pwsh
         run: |
