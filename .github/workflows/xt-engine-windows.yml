@@ -337,6 +337,11 @@ jobs:
             $secret=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
             if ((Run-Engine '--xt-set-password-stdin' $secret) -ne 'Done!') { throw 'Safety password update was not acknowledged' }
             Write-Host 'Verified running XT service, device ID and acknowledged password change.'
+            # Service setup must not open the component's standalone home UI.
+            Start-Sleep -Seconds 3
+            $homeWindows=@(Get-Process XTRemoteEngine -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+            if ($homeWindows.Count -ne 0) { throw 'Service setup opened a standalone engine window' }
+            Write-Host 'Verified service setup leaves no standalone engine window.'
             Add-Type -AssemblyName System.Windows.Forms
             Add-Type @'
           using System;
