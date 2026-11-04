@@ -88,6 +88,41 @@ jobs:
             $secret=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
             if ((Run-Engine '--xt-set-password-stdin' $secret) -ne 'Done!') { throw 'Safety password update was not acknowledged' }
             Write-Host 'Verified running XT service, device ID and acknowledged password change.'
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class XTWindowCheck {
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+          }
+          '@
+            $form=[Windows.Forms.Form]::new()
+            $panel=[Windows.Forms.Panel]::new()
+            $panel.Dock='Fill'
+            $form.Controls.Add($panel)
+            $form.Show()
+            $viewer=$null
+            try {
+              # Use only the disposable runner's own ID to probe native window parenting.
+              $viewer=Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -ArgumentList @('--xt-hosted-desktop',$peer,$panel.Handle.ToInt64().ToString(),$PID.ToString())
+              $until=(Get-Date).AddSeconds(40)
+              do {
+                [Windows.Forms.Application]::DoEvents()
+                $child=[XTWindowCheck]::FindWindowEx($panel.Handle,[IntPtr]::Zero,$null,'XT Remote Session')
+                if ($child -ne [IntPtr]::Zero) { break }
+                if ($viewer.HasExited) { throw "Hosted viewer exited before attaching: $($viewer.ExitCode)" }
+                Start-Sleep -Milliseconds 100
+              } while ((Get-Date) -lt $until)
+              if ($child -eq [IntPtr]::Zero) { throw 'Missing embedded session child window' }
+              [uint32]$owner=0
+              $null=[XTWindowCheck]::GetWindowThreadProcessId($child,[ref]$owner)
+              if ($owner -ne $viewer.Id) { throw 'Embedded window belongs to unexpected process' }
+              Write-Host 'Verified native session window is a direct child of the supplied host panel.'
+            } finally {
+              $form.Dispose()
+              if ($viewer -and !$viewer.HasExited) { $viewer.Kill() }
+            }
           } finally {
             Get-Service $name -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
           }
